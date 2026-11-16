@@ -742,7 +742,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
       <button class="set-row danger" id="btnClearAll">删除全部对话</button>
     </div>
 
-    <p class="set-hint" id="buildTag">版本 2026-11-16 11:51</p>
+    <p class="set-hint" id="buildTag">版本 2026-11-16 12:20</p>
     <div class="set-foot">
       本地练习版 · 界面模仿 DeepSeek，与官方无关<br>
       语音输入需要 Chrome / Edge 浏览器，且页面地址为 https 或 localhost
@@ -2696,19 +2696,49 @@ $('#noteClearDone')?.addEventListener('click', () => {
 });
 
 /* ---------------- 朗读设置 ---------------- */
+const MALE_NAME = /云希|云扬|云健|云夏|雲龍|雲哲|云龙|云哲|Kangkang|Yunxi|Yunyang|Yunjian|Yunxia/i;
+const FEMALE_NAME = /晓晓|晓伊|晓北|晓妮|曉曼|曉佳|曉臻|曉雨|Huihui|Yaoyao|Xiaoxiao|Xiaoyi/i;
+
+function voiceLabel(v) {
+  const male = MALE_NAME.test(v.name);
+  const female = FEMALE_NAME.test(v.name);
+  const natural = /Natural/i.test(v.name);
+  const short = v.name
+    .replace(/^Microsoft\s+/i, '')
+    .replace(/\s*Online\s*\(Natural\)\s*/i, ' ')
+    .replace(/\s*-\s*Chinese.*$/i, '')
+    .replace(/\s*Multilingual\s*/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || v.name;
+  const tag = [male ? '男' : female ? '女' : '', natural ? '自然' : '机械'].filter(Boolean).join('·');
+  return tag ? short + '（' + tag + '）' : short;
+}
+
+function voiceScore(v) {
+  let s = 0;
+  if (/^zh[-_]CN$/i.test(v.lang)) s += 100;
+  else if (/^zh[-_]CN/i.test(v.lang)) s += 80;
+  else if (/^zh[-_](TW|HK)/i.test(v.lang)) s += 60;
+  if (/Natural/i.test(v.name)) s += 30;
+  if (MALE_NAME.test(v.name)) s += 8;      // 同一档里男声排前面
+  return s;
+}
+
 function fillVoiceSelect() {
   const sel = $('#ttsVoice');
   if (!sel) return;
-  const vs = zhVoices();
+  const vs = zhVoices().slice().sort((a, b) => voiceScore(b) - voiceScore(a));
   if (!vs.length) {
     sel.innerHTML = '<option value="">系统里没有可用的语音</option>';
     return;
   }
   const cur = S.settings.ttsVoice || '';
   sel.innerHTML = vs.map(v =>
-    `<option value="${esc(v.voiceURI || v.name)}">${esc(v.name)}（${esc(v.lang)}）</option>`
+    `<option value="${esc(v.voiceURI || v.name)}">${esc(voiceLabel(v))}</option>`
   ).join('');
-  sel.value = cur && vs.some(v => (v.voiceURI || v.name) === cur) ? cur : (vs[0].voiceURI || vs[0].name);
+  const fallback = vs[0].voiceURI || vs[0].name;
+  sel.value = cur && vs.some(v => (v.voiceURI || v.name) === cur) ? cur : fallback;
+  if (!cur) { S.settings.ttsVoice = sel.value; saveState(); }
 }
 
 function syncTtsUI() {
