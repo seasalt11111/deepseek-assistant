@@ -742,7 +742,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
       <button class="set-row danger" id="btnClearAll">删除全部对话</button>
     </div>
 
-    <p class="set-hint" id="buildTag">版本 2026-11-16 11:32</p>
+    <p class="set-hint" id="buildTag">版本 2026-11-16 11:51</p>
     <div class="set-foot">
       本地练习版 · 界面模仿 DeepSeek，与官方无关<br>
       语音输入需要 Chrome / Edge 浏览器，且页面地址为 https 或 localhost
@@ -2497,11 +2497,20 @@ document.addEventListener('touchend', e => {
 
 /* ---------------- 初始化 ---------------- */
 // 本地代理地址：用 启动.bat 打开时就是当前地址；用 file:// 打开时退回默认端口
+// 已经部署好、能长期跑的代理（Netlify 函数）。页面搬到别的托管（GitHub Pages 等）时直接借用它。
+const PROXY_FALLBACK = 'https://seasalt-sapphire.netlify.app/api';
+
 function proxyBase() {
-  // 网页自己被托管时（http/https），默认就用「同域名的 /api」——
-  // 本机版由 serve.mjs 兜，公网版由 Netlify 函数兜
-  if (location.protocol === 'http:' || location.protocol === 'https:') return location.origin + '/api';
-  return 'http://localhost:8787/api';   // 直接双击 index.html（file://）时只有一个候选
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+    return 'http://localhost:8787/api';        // 直接双击 index.html 打开
+  }
+  const host = location.hostname;
+  // 本机 / 局域网 / Netlify 站点：同域名下的 /api 就是代理
+  if (isLocalHost() || /\.netlify\.app$/i.test(host) || host === 'localhost' || /^127\./.test(host)) {
+    return location.origin + '/api';
+  }
+  // 其它托管（GitHub Pages、Surge…）：借用已经部署好的函数
+  return PROXY_FALLBACK;
 }
 
 // 首次打开时探一下：本站有没有可用的 API 代理？有就自动切过去（只做一次，之后尊重你的选择）
