@@ -722,6 +722,13 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
     <div class="set-group">
       <div class="set-label">朗读</div>
       <select class="set-select" id="ttsVoice"></select>
+      <div class="preset-row" id="ttsPresets">
+        <button class="chip" data-tts="magnetic">磁性男声</button>
+        <button class="chip" data-tts="anchor">播报腔</button>
+        <button class="chip" data-tts="bright">清朗</button>
+        <button class="chip" data-tts="warm">温柔女声</button>
+      </div>
+      <p class="set-hint" id="ttsInfo">—</p>
       <div class="temp-row">
         <span>语速</span>
         <input type="range" id="ttsRate" min="0.6" max="1.6" step="0.05" value="1">
@@ -742,7 +749,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
       <button class="set-row danger" id="btnClearAll">删除全部对话</button>
     </div>
 
-    <p class="set-hint" id="buildTag">版本 2026-11-16 12:20</p>
+    <p class="set-hint" id="buildTag">版本 2026-11-16 12:26</p>
     <div class="set-foot">
       本地练习版 · 界面模仿 DeepSeek，与官方无关<br>
       语音输入需要 Chrome / Edge 浏览器，且页面地址为 https 或 localhost
@@ -2093,22 +2100,23 @@ function stopSpeak() {
 }
 
 // 把长文本切成句子，逐句朗读：听起来自然，也方便随时打断
-function splitForSpeech(text) {
+function splitForSpeech(text, chunkLen) {
+  const LIMIT = chunkLen || 100;
   const clean = String(text || '')
     .replace(/```[\s\S]*?```/g, '（代码略）')
     .replace(/[#*`>_|]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 6000);
+    .slice(0, 8000);
   const rough = clean.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [clean];
   const out = [];
   for (const p of rough) {
     const t = p.trim();
     if (!t) continue;
-    if (t.length <= 100) { out.push(t); continue; }
+    if (t.length <= LIMIT) { out.push(t); continue; }
     let buf = '';
     for (const seg of t.split(/(?<=[，,、：:])/)) {
-      if (buf && (buf + seg).length > 100) { out.push(buf); buf = seg; }
+      if (buf && (buf + seg).length > LIMIT) { out.push(buf); buf = seg; }
       else buf += seg;
     }
     if (buf) out.push(buf);
@@ -2122,7 +2130,9 @@ function speak(text, btn) {
   if (btn && btn === spk.btn) { stopSpeak(); toast('已停止朗读', 1200); return; }
   stopSpeak();
 
-  const parts = splitForSpeech(text);
+  const chosen = pickVoice(S.settings.ttsVoice);
+  const isCloud = !!chosen && /Natural|Online/i.test(chosen.name);   // 云端语音：大块，避免一句一顿
+  const parts = splitForSpeech(text, isCloud ? 700 : 100);
   if (!parts.length) { toast('这条没有可朗读的内容'); return; }
 
   spk.btn = btn; spk.queue = parts; spk.idx = 0; spk.active = true;
@@ -2746,8 +2756,37 @@ function syncTtsUI() {
   fillVoiceSelect();
   if ($('#ttsRate')) { $('#ttsRate').value = String(s.ttsRate || 1); $('#ttsRateVal').textContent = Number(s.ttsRate || 1).toFixed(2); }
   if ($('#ttsPitch')) { $('#ttsPitch').value = String(s.ttsPitch || 1); $('#ttsPitchVal').textContent = Number(s.ttsPitch || 1).toFixed(2); }
+  const picked = pickVoice(s.ttsVoice);
+  const info = $('#ttsInfo');
+  if (info) {
+    info.textContent = picked
+      ? '当前：' + voiceLabel(picked) + ' · ' + (/Natural|Online/i.test(picked.name) ? '云端语音（自然，需联网）' : '系统本地语音（机械味重）')
+      : '系统里没有可用语音';
+  }
 }
 
+/* 音色预设：磁性 = 低音调 + 稍慢 */
+const TTS_PRESETS = {
+  magnetic: { re: /云扬|Yunyang/i, rate: 0.95, pitch: 0.82 },
+  anchor:   { re: /云健|Yunjian/i, rate: 1.0, pitch: 0.95 },
+  bright:   { re: /云希|Yunxi/i, rate: 1.05, pitch: 1.02 },
+  warm:     { re: /晓晓|Xiaoxiao/i, rate: 1.0, pitch: 1.0 }
+};
+
+$('#ttsPresets')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-tts]');
+  if (!b) return;
+  const p = TTS_PRESETS[b.dataset.tts];
+  if (!p) return;
+  const all = speechSynthesis.getVoices() || [];
+  const hit = all.find(v => p.re.test(v.name));
+  if (hit) S.settings.ttsVoice = hit.voiceURI || hit.name;
+  S.settings.ttsRate = p.rate;
+  S.settings.ttsPitch = p.pitch;
+  saveState(); syncTtsUI();
+  $$('#ttsPresets .chip').forEach(x => x.classList.toggle('on', x === b));
+  speak('白天的时候，这座城市像一台永不停歇的机器；到了夜里，它才慢慢露出自己的呼吸。', b);
+});
 if ('speechSynthesis' in window) {
   speechSynthesis.addEventListener('voiceschanged', () => { if ($('#ttsVoice')) fillVoiceSelect(); });
 }
