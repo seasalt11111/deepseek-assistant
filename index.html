@@ -749,7 +749,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
       <button class="set-row danger" id="btnClearAll">删除全部对话</button>
     </div>
 
-    <p class="set-hint" id="buildTag">版本 2026-11-16 12:26</p>
+    <p class="set-hint" id="buildTag">版本 2026-11-16 21:01</p>
     <div class="set-foot">
       本地练习版 · 界面模仿 DeepSeek，与官方无关<br>
       语音输入需要 Chrome / Edge 浏览器，且页面地址为 https 或 localhost
@@ -800,6 +800,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
 'use strict';
 
 /* ---------------- 基础工具 ---------------- */
+const BUILD_STAMP = '2026-11-16 21:01';   // 构建时被替换成本地时间
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -1501,7 +1502,12 @@ async function runAssistant(chat, payload, reuse) {
   const paint = () => {
     const n = node(); if (!n) return;
     const mdEl = n.querySelector('.md');
-    if (mdEl) mdEl.innerHTML = md(m.content) + (m.streaming ? '<span class="caret"></span>' : '');
+    if (mdEl) {
+      // 流式期间不要解析 Markdown：未闭合的表格/代码块会把汉字挪到格子里，看起来像"乱序"
+      mdEl.innerHTML = m.streaming
+        ? esc(m.content).replace(/\n/g, '<br>') + '<span class="caret"></span>'
+        : md(m.content);
+    }
     if (m.think || m.thinking) paintThink(n, m);
     scrollToBottom();
   };
@@ -1620,9 +1626,14 @@ function paintThink(n, m) {
   let box = n.querySelector('.think');
   if (!box) {
     box = document.createElement('div');
-    box.className = 'think open';
+    // 思考过程中默认展开（要看得见）；用户手动点过收起就记住
+    box.className = 'think' + (m.thinkOpen === false ? '' : ' open');
     box.innerHTML = `<button class="think-head">${SVG.bulb}<span class="th"></span>${SVG.chev}</button><div class="think-body"></div>`;
-    box.querySelector('.think-head').addEventListener('click', () => box.classList.toggle('open'));
+    box.querySelector('.think-head').addEventListener('click', () => {
+      const isOpen = box.classList.toggle('open');
+      m.thinkOpen = isOpen;
+      try { saveState(); } catch (e) {}
+    });
     n.querySelector('.msg-body').insertBefore(box, n.querySelector('.md'));
   }
   box.querySelector('.think-head').innerHTML = m.thinking
@@ -2070,6 +2081,7 @@ async function apiRun(chat, m, payload, { onThink, onText, onTool, signal, extra
   } finally {
     clearInterval(watchdog);
   }
+  try { buf += dec.decode(); } catch (e) {}   // 冲掉解码器余量（多字节汉字被切断时用）
   if (netErr) m.cutOff = true;
 }
 
@@ -2813,6 +2825,29 @@ $('#btnTtsTest')?.addEventListener('click', e => {
   speak(t, e.currentTarget);
 });
 
+// 检查是否有新版本（手机缓存旧页面时，这里会弹提示，一键清缓存刷新）
+async function checkUpdate() {
+  try {
+    const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j.build || j.build === BUILD_STAMP) return;
+    toast('发现新版本（' + j.build + '），点这里刷新', 60000, {
+      label: '刷新',
+      fn: async () => {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(x => x.unregister()));
+        } catch (e) {}
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        } catch (e) {}
+        location.reload();
+      }
+    });
+  } catch (e) { /* 离线或没有 version.json 就跳过 */ }
+}
 function init() {
   loadState();
 
@@ -2852,6 +2887,7 @@ function init() {
   autosize(); refreshSend();
   if ('speechSynthesis' in window) speechSynthesis.getVoices();
   setTimeout(maybeAutoEnableApi, 900);   // 稍等一下再探测，别和首屏抢资源
+  setTimeout(checkUpdate, 4500);        // 顺便看看有没有新版本
   // Netlify 免费版会在页面底部注入一个角标，给底部输入区让点空间别被挡住
   setTimeout(() => {
     if (document.querySelector('script[data-netlify-site-id], iframe[src*="netlify"]')) {
