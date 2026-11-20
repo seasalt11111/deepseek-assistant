@@ -749,7 +749,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
       <button class="set-row danger" id="btnClearAll">删除全部对话</button>
     </div>
 
-    <p class="set-hint" id="buildTag">版本 2026-11-16 21:01</p>
+    <p class="set-hint" id="buildTag">版本 2026-11-20 12:48</p>
     <div class="set-foot">
       本地练习版 · 界面模仿 DeepSeek，与官方无关<br>
       语音输入需要 Chrome / Edge 浏览器，且页面地址为 https 或 localhost
@@ -800,7 +800,7 @@ body.nf-hud .composer-wrap{padding-bottom:calc(50px + var(--safe-b))}
 'use strict';
 
 /* ---------------- 基础工具 ---------------- */
-const BUILD_STAMP = '2026-11-16 21:01';   // 构建时被替换成本地时间
+const BUILD_STAMP = '2026-11-20 12:48';   // 构建时被替换成本地时间
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -1915,15 +1915,34 @@ function collectSources(m, call) {
 function apiMessages(chat, useTools) {
   const hist = chat.messages.filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && !m.streaming));
   const tail = hist.slice(-20);
-  const out = tail.map(m => {
+  const mapped = tail.map(m => {
     const o = { role: m.role, content: m.content || '' };
     // 官方规定：带 tools 的请求必须回传上一轮的 reasoning_content，否则 400
     if (useTools && m.role === 'assistant') o.reasoning_content = m.think || '';
     return o;
   });
+
+  // 规范化消息序列，否则服务端会报 "an assistant message must follow a user message"：
+  // ① 截取最近 20 条时可能正好从 assistant 开始
+  // ② 删除/编辑后可能出现连续两条同角色
+  const out = [];
+  for (let i = 0; i < mapped.length; i++) {
+    const m = mapped[i];
+    const isTail = i === mapped.length - 1;
+    const prev = out[out.length - 1];
+    // 最后一条是"本次要发的这句话"，不合并（apiRun 会用带附件的 payload 替换它）
+    if (prev && prev.role === m.role && !(isTail && m.role === 'user')) {
+      if (m.role === 'user') prev.content = (prev.content || '') + '\n\n' + (m.content || '');
+      else { prev.content = m.content; prev.reasoning_content = m.reasoning_content; }
+    } else {
+      out.push({ ...m });
+    }
+  }
+  while (out.length && out[0].role !== 'user') out.shift();   // 首条必须是 user
+
   // 智能体描述：作为 system 消息放在最前面
   const sys = chatSys(chat).trim();
-  if (sys) out.unshift({ role: 'system', content: sys });
+  if (sys && out.length) out.unshift({ role: 'system', content: sys });
   return out;
 }
 
